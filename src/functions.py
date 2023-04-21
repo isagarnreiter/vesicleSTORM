@@ -10,49 +10,275 @@ from numba import njit, prange
 import pandas as pd
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
+from skimage.feature import peak_local_max
+from scipy import ndimage as ndi
+from skimage.segmentation import watershed
+import math
+from skimage import measure
 
-def get_wide_field(data, image_size, kernel_size, sigma):
+
+def sort_dict_by_keywords(d, keywords):
+    sorted_dict = {}
+    for key in sorted(d.keys()):
+        for kw in keywords:
+            if kw in key:
+                if kw in sorted_dict:
+                    if type(d[key]) == float:
+                        sorted_dict[kw] = np.append([sorted_dict[kw], d[key]])
+                    
+                    elif type(d[key]) == dict:
+                        dic = list(d[key].values())
+                        sorted_dict[kw] =  sorted_dict[kw] + dic
+                    
+                    else:
+                        sorted_dict[kw] = np.concatenate([sorted_dict[kw], d[key]])
+                
+                else:
+                    if type(d[key]) == float:
+                        sorted_dict[kw] = np.array([d[key]])
+                    
+                    elif type(d[key]) == dict:
+                        dic = list(d[key].values())
+
+                        sorted_dict[kw] = dic
+                    
+                    else:
+                        sorted_dict[kw] = d[key]
+    return sorted_dict
+
+
+@njit(fastmath=True,parallel=True)
+def calc_distance_squared_two(vec_1,vec_2):
+
+    res=np.empty((vec_1.shape[0]),dtype=vec_1.dtype)
+    for i in prange(vec_1.shape[0]):
+        dist= np.sqrt((vec_1[i,0]-vec_2[:,0])**2+(vec_1[i,1]-vec_2[:,1])**2+(vec_1[i,2]-vec_2[:,2])**2)
+        res[i] = np.min(dist[np.nonzero(dist)])
+    return res
+
+
+def simulation_batch(batch_nb, dim, size):
+    '''
     
-    #prep data for image
-    data[:,2] =+ 485
-    data = data/49660*image_size
+    Function to generate simulations of SMLM data for labelled synaptic proteins.
     
-    #initialise background with a buffer
-    buffered_image_dim = tuple(map(lambda i, j: i + j, image_size, kernel_size))
-    buffered_image = np.zeros(buffered_image_dim)
-
-    #initialise the gaussian distribution with size being the size of the kernel and sigma defining the standard deviation of the point spread function
-    kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kernel_size[0]-1)/2)**2+(y-(kernel_size[1]-1)/2)**2+(z-(kernel_size[2]-1)/2)**2)/(2*sigma**2))), kernel_size)
-    kernel = kernel / np.max(kernel)
-
-    #get the pixel location of the data
-    point_coord = np.round(data).astype(int)
-    #add gaussian point spread function at each point location
-    for y, x, z in point_coord:
-        buffered_image[x:x+kernel.shape[0], y:y+kernel.shape[1], z:z+kernel.shape[2]] += kernel
+    Input:
+    batch_nb = number of simulations to produce
+    dim = resolution of the images - in the case of the nikon STORM microscope - 17x17x50
+    size = size of the field of view
     
-    #remove buffer from image
-    image = buffered_image[kernel.shape[0]//2:-kernel.shape[0]//2, kernel.shape[1]//2:-kernel.shape[1]//2, kernel.shape[2]//2:-kernel.shape[2]//2]
+    The simulation initialises a random density of background noise (between 1e-10 and 1e-9) for the given field of view.
+    Clusters vary in number (1 to 8), size, number of points contained (50 to 200) and location.
     
-    return image
+    Output:
+    batch = dictionary containing arrays of point locations (x,y,z) for all the simulations generated.
+    
+    '''
+    
+    
+    # Function to generate random points around a given center
+    def generate_points_within_range(center, num_points, ranges):
+        x = np.random.uniform(center[0]-ranges[0]/2, center[0]+ranges[0]/2, num_points)
+        y = np.random.uniform(center[1]-ranges[1]/2, center[1]+ranges[1]/2, num_points)
+        z = np.random.uniform(center[2]-ranges[2]/2, center[2]+ranges[2]/2, num_points)
+        return np.column_stack((x, y, z))
+    
+    
+    dxyz = np.array(dim)*np.array(size)
+    
+    batch = {}
 
-def get_local_max_3d(img, kernelsize, std_threshold):
-    # Get coordinates of local maxima 
+    sim_params = {}
+    sim_params['background point density'] = []
+    sim_params['number of clusters'] = []
+    sim_params['cluster ranges'] = []
+    sim_params['points per cluster'] = []
+    sim_params['cluster locations'] = []
+    
+    for n in range(0,batch_nb):
+        
+        # Define the total number of data points
+        bckgrd_density = np.random.uniform(1e-10, 1e-9)
+        bckgrd = int(bckgrd_density*dxyz[1]*dxyz[1]*dxyz[2])
+        print(bckgrd)
 
-    img2 = ndimage.maximum_filter(img, size=kernelsize)
+        # Generate a random number of clusters between 5 and 15
+        num_clusters = np.random.randint(1, 8)
 
-    # Threshold the image to find locations of interest
-    img_thresh = img2.mean() + img2.std() * std_threshold
+        # Generate random cluster centers
+        x = np.random.randint(0, dxyz[0], size=(num_clusters))
+        y = np.random.randint(0, dxyz[1], size=(num_clusters))
+        z = np.random.randint(0, dxyz[2], size=(num_clusters))
 
-    # Since we're looking for maxima find areas greater than img_thresh
-    labels, num_labels = ndimage.label(img2 > img_thresh)
+        centers = np.array([x,y,z]).T
 
-    # Get the positions of the maxima
-    coords = ndimage.center_of_mass(img, labels=labels, index=np.arange(1, num_labels + 1))
-    coords = np.array(coords)
-    # Get the maximum value in the labels    
+        # Generate random background noise
+        xb = np.random.randint(0, dxyz[0], size=(bckgrd))
+        yb = np.random.randint(0, dxyz[1], size=(bckgrd))
+        zb = np.random.randint(0, dxyz[2], size=(bckgrd))
 
-    return coords
+        bckgrd_points = np.array([xb,yb,zb]).T
+
+        # Generate range for the clusters
+        xr = np.random.uniform(dim[0]*30, dim[0]*150, size=num_clusters)
+        yr = np.random.uniform(dim[1]*30, dim[1]*100, size=num_clusters)
+        zr = np.random.uniform(dim[2]*1, dim[2]*5, size=num_clusters)
+
+        ranges = np.array([xr,yr,zr]).T
+
+        # Generate data points for each cluster
+        number_points = []
+        data_points = []
+        for i in range(num_clusters):
+            num_points = np.random.randint(50, 200)
+            cluster_points = generate_points_within_range(centers[i], num_points, ranges[i])
+            number_points.append(num_points)
+            data_points.append(cluster_points)
+
+        # Combine all the data points into a single array
+        data_points = np.vstack(data_points)
+
+        # Add background noise
+        data_points_with_noise = np.vstack((data_points, bckgrd_points))
+        
+        
+        sim_params
+        batch[n] = data_points_with_noise
+        
+        sim_params['background point density'].append(bckgrd_density)
+        sim_params['number of clusters'].append(num_clusters)
+        sim_params['cluster ranges'].append(ranges)
+        sim_params['points per cluster'].append(number_points)
+        sim_params['cluster locations'].append(centers)
+        
+        
+    return batch, sim_params
+    
+
+def get_clustered_points(data, params):
+
+    def map_to_im(data, og_dimensions, new_dimensions):
+        
+        data_t = data.copy()
+        data_t = data_t/og_dimensions*new_dimensions
+        image = np.zeros(new_dimensions)
+        
+        #get the pixel location of the data
+        point_coord = np.round(data_t).astype(int)
+        for x, y, z in point_coord:
+            image[x, y, z-1] += 1
+    
+        return image
+    
+    def get_gaussiankde(image, kernel_size, sigma):
+        
+        image_t = image.copy() 
+        kx, ky, kz = kernel_size[0], kernel_size[1], kernel_size[2]
+        
+        #initialise background with a buffer
+        image_buf = np.pad(image_t, ((kx//2,),(ky//2,), (kz//2,)))
+    
+        #initialise the gaussian distribution with size being the size of the kernel and sigma defining the standard deviation of the point spread function
+        kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kx-1)/2)**2+(y-(ky-1)/2)**2+(z-(ky-1)/2)**2)/(2*sigma**2))), kernel_size)
+        kernel = kernel / np.max(kernel)
+    
+        #add gaussian point spread function at each point location
+        wide_field = np.zeros(image_buf.shape) 
+        for x in range(0, image_t.shape[0]):
+            for y in range(0, image_t.shape[1]):
+                for z in range(0, image_t.shape[2]):
+                    if image_t[x,y,z] > 0:
+                        wide_field[x:x+kx, y:y+ky, z:z+kz] += kernel * image_t[x,y,z]
+        
+        #remove buffer from image
+        image = wide_field[kx//2:-kx//2, ky//2:-ky//2, kz//2:-kz//2]
+        return image
+
+    def calculate_distance(coord1, coord2):
+        """Calculates the distance between two coordinates in 3D space"""
+        return math.sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2 + (coord1[2]-coord2[2])**2)
+    
+    def filter_coords(coords, min_distance):
+        """Filters a list of coordinates to merge points that are too close to one another"""
+        filtered_coords = [coords[0]]
+        for i in range(1, len(coords)):
+            prev_coord = filtered_coords[-1]
+            curr_coord = coords[i]
+            dist = calculate_distance(prev_coord, curr_coord)
+            if dist < min_distance:
+                # Calculate midpoint between the two points
+                midpoint = ((prev_coord[0] + curr_coord[0]) / 2, (prev_coord[1] + curr_coord[1]) / 2, (prev_coord[2] + curr_coord[2]) / 2)
+                # Replace previous coordinate with midpoint
+                filtered_coords[-1] = np.round(midpoint).astype(int)
+            else:
+                # Add current coordinate to the list
+                filtered_coords.append(curr_coord)
+        return filtered_coords
+    
+    def filter_clusters(img, min_area, max_area):
+        """Filters clusters in 3D image based on their area"""
+        regions = measure.regionprops(img)
+        filtered_img = np.zeros_like(img)
+        for region in regions:
+            if region.area >= min_area and region.area<=max_area:
+                for coord in region.coords:
+                    filtered_img[coord[0], coord[1], coord[2]] = region.label
+        return filtered_img
+    
+
+    true_roi_size = params['true_roi_size'] 
+    sf = params['sf']
+    kernel_size = params['kernel_size']
+    sigma = params['sigma']
+    max_threshold_ves = params['max_threshold_ves']
+    min_peak_dist = params['min_peak_dist'] 
+    min_cluster_area = params['min_cluster_area']
+    max_cluster_area = params['max_cluster_area']
+    
+    image_size = (true_roi_size[0]//sf[0], true_roi_size[1]//sf[1], true_roi_size[2]//sf[2])
+    
+    #plot the locations of the vesicles using the same image size as above to a single pixel size and using a large point spread function
+    image_vesicles = map_to_im(data, true_roi_size, image_size)
+    wide_field_vesicles = get_gaussiankde(image_vesicles, kernel_size, sigma)
+
+    #calculate the intensity threshold for the large PSF images, depending on an arbitrary intensity threshold, dependent on the mean and std of each image.
+    ves_thresh = wide_field_vesicles.mean() + wide_field_vesicles.std() * max_threshold_ves
+
+    #create a mask of the large PSF images where for the pixels above the threshold
+    mask_vesicles = (wide_field_vesicles > ves_thresh) * 1
+
+    #get the local peaks, defining the central coordinate of synapses
+    peak_coords = peak_local_max(wide_field_vesicles,labels = mask_vesicles)
+    #filter the peak distances to exclude peaks which are too close to one another and replace them by the halfway point
+    peak_coords = np.array(filter_coords(peak_coords, min_peak_dist))
+
+    #create labels for each peak
+    mask = np.zeros(image_vesicles.shape, dtype=bool)
+    mask[tuple(peak_coords.T)] = True
+    markers, _ = ndi.label(mask)
+
+    #apply watershed to seperate clusters, based on the previously computed mask and the local peaks
+    synapse_clusters = watershed(-wide_field_vesicles, markers = markers, mask=mask_vesicles)
+    #filter clusters to exclude clusters which are too small
+    filtered_clusters = filter_clusters(synapse_clusters, min_cluster_area, max_cluster_area)
+
+    #extract point locations within selected clusters
+    vesicle_clusters_loc = {}
+    for location in data:
+
+        x,y,z = location
+        i,j,k = int(round(x/sf[0])), int(round(y/sf[1])), int(round(z/sf[2])-1)
+        if filtered_clusters[i,j,k]>0:
+            index = filtered_clusters[i,j,k]
+            if index in vesicle_clusters_loc:
+                vesicle_clusters_loc[index] = np.append(vesicle_clusters_loc[index], [location], axis=0)
+            else:
+                vesicle_clusters_loc[index] = np.array([location])      
+        
+        if 0 in list(vesicle_clusters_loc.keys()):
+            vesicle_clusters_loc.pop(0)     
+
+    return peak_coords, filtered_clusters, vesicle_clusters_loc
 
 
 def create_histogram(list_of_thresholds, ves_min_dists, saveas = "", save=False):
@@ -65,32 +291,6 @@ def create_histogram(list_of_thresholds, ves_min_dists, saveas = "", save=False)
         plt.savefig(f'/Users/isabellegarnreiter/Documents/vesicleSTORM/results/Graphs/{saveas}.png')
     plt.show()
 
-def sort_dict_by_keywords(d, keywords):
-    sorted_dict = {}
-    for key in sorted(d.keys()):
-        for kw in keywords:
-            if kw in key:
-                if kw in sorted_dict:
-                    if type(d[key]) == float:
-                        sorted_dict[kw] = np.append([sorted_dict[kw], d[key]])
-                    
-                    else:
-                        sorted_dict[kw] = np.concatenate([sorted_dict[kw], d[key]])
-                else:
-                    if type(d[key]) == float:
-                        sorted_dict[kw] = np.array([d[key]])
-                    else:
-                        sorted_dict[kw] = d[key]
-    return sorted_dict
-
-@njit(fastmath=True,parallel=True)
-def calc_distance_squared_two(vec_1,vec_2):
-
-    res=np.empty((vec_1.shape[0]),dtype=vec_1.dtype)
-    for i in prange(vec_1.shape[0]):
-        dist= np.sqrt((vec_1[i,0]-vec_2[:,0])**2+(vec_1[i,1]-vec_2[:,1])**2+(vec_1[i,2]-vec_2[:,2])**2)
-        res[i] = np.min(dist[np.nonzero(dist)])
-    return res
 
 
 def analysis(list_of_files_for_analysis):
@@ -133,3 +333,46 @@ def save_csv_files(target_path, list_of_files):
         os.rename(new_path_w2, new_path+'/'+new_file_name_w2)
     
     
+def get_wide_field(data, image_size, kernel_size, sigma):
+    
+    #prep data for image
+    data[:,2] =+ 485
+    data = data/49660*image_size
+    
+    #initialise background with a buffer
+    buffered_image_dim = tuple(map(lambda i, j: i + j, image_size, kernel_size))
+    buffered_image = np.zeros(buffered_image_dim)
+
+    #initialise the gaussian distribution with size being the size of the kernel and sigma defining the standard deviation of the point spread function
+    kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kernel_size[0]-1)/2)**2+(y-(kernel_size[1]-1)/2)**2+(z-(kernel_size[2]-1)/2)**2)/(2*sigma**2))), kernel_size)
+    kernel = kernel / np.max(kernel)
+
+    #get the pixel location of the data
+    point_coord = np.round(data).astype(int)
+    #add gaussian point spread function at each point location
+    for y, x, z in point_coord:
+        buffered_image[x:x+kernel.shape[0], y:y+kernel.shape[1], z:z+kernel.shape[2]] += kernel
+    
+    #remove buffer from image
+    image = buffered_image[kernel.shape[0]//2:-kernel.shape[0]//2, kernel.shape[1]//2:-kernel.shape[1]//2, kernel.shape[2]//2:-kernel.shape[2]//2]
+    
+    return image
+
+
+def get_local_max_3d(img, kernelsize, std_threshold):
+    # Get coordinates of local maxima 
+
+    img2 = ndimage.maximum_filter(img, size=kernelsize)
+
+    # Threshold the image to find locations of interest
+    img_thresh = img2.mean() + img2.std() * std_threshold
+
+    # Since we're looking for maxima find areas greater than img_thresh
+    labels, num_labels = ndimage.label(img2 > img_thresh)
+
+    # Get the positions of the maxima
+    coords = ndimage.center_of_mass(img, labels=labels, index=np.arange(1, num_labels + 1))
+    coords = np.array(coords)
+    # Get the maximum value in the labels    
+
+    return coords
