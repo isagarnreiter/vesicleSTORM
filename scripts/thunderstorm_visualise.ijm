@@ -1,8 +1,5 @@
 inputdir = getDir("")
 
-experiment = "210414 SPON647_PSD680 8DIV"
-cellzone = "CellZone1"
-
 filepath1 = inputdir+"CoordTable_SAFE360_MULTIPLEXING_demixed_w1_UncertaintyFiltered.csv"
 filepath2 = inputdir+"CoordTable_SAFE360_MULTIPLEXING_demixed_w2_UncertaintyFiltered.csv"
 
