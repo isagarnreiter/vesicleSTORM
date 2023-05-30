@@ -26,11 +26,16 @@ params['min_cluster_area'] = 10
 params['max_cluster_area'] = 50000
 
 
-target_marker = 'PSD'
-access = 'computer'
+target_marker = 'VAMP2680'
+access = 'drive'
 target_directory_comp = '/users/isabellegarnreiter/documents/vesicleSTORM/data/STORM_csv_files/'
 target_directory_drive = '/users/isabellegarnreiter/desktop/'
-target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/psd_storm_data.pkl'
+target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/vamp2_storm_data.pkl'
+
+markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647']
+DIVs = ['8DIV', '10DIV']
+
+assert target_marker in markers, "target_marker not in the list of available markers"
 
 
 # Import all files (cell zones) under one experiment type, but for both dep and spon vesicle targets
@@ -98,8 +103,6 @@ print('done')
 
 #initiate the csv file to store the information
 
-markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP680', 'VGLUT647']
-DIVs = ['8DIV', '10DIV']
 cz = np.linspace(0,12,13).astype(int)
        
 storm_data = pd.DataFrame(columns = ['FileName', 
