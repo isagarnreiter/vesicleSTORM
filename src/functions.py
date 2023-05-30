@@ -15,7 +15,6 @@ from scipy import ndimage as ndi
 from skimage.segmentation import watershed
 import math
 from skimage import measure
-from skimage.morphology import area_opening, area_closing
 
 
 def sort_dict_by_keywords(d, keywords):
@@ -152,70 +151,76 @@ def simulation_batch(batch_nb, dim, size):
         
         
     return batch, sim_params
+ 
+
+#extract location of synapses as blobs in 3D
+def map_to_im(data, og_dimensions, new_dimensions):
     
+    data_t = data.copy()
+    data_t = data_t/og_dimensions*new_dimensions
+    image = np.zeros(new_dimensions)
+    
+    #get the pixel location of the data
+    point_coord = np.round(data_t).astype(int)
+    for x, y, z in point_coord:
+        image[x, y, z-1] += 1
+
+    return image
+
+
+def get_gaussiankde(image, kernel_size, sigma):
+    
+    image_t = image.copy() 
+    kx, ky, kz = kernel_size[0], kernel_size[1], kernel_size[2]
+    
+    #initialise background with a buffer
+    image_buf = np.pad(image_t, ((kx//2,),(ky//2,), (kz//2,)))
+
+    #initialise the gaussian distribution with size being the size of the kernel and sigma defining the standard deviation of the point spread function
+    kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kx-1)/2)**2+(y-(ky-1)/2)**2+(z-(ky-1)/2)**2)/(2*sigma**2))), kernel_size)
+    kernel = kernel / np.max(kernel)
+
+    #add gaussian point spread function at each point location
+    wide_field = np.zeros(image_buf.shape) 
+    for x in range(0, image_t.shape[0]):
+        for y in range(0, image_t.shape[1]):
+            for z in range(0, image_t.shape[2]):
+                if image_t[x,y,z] > 0:
+                    wide_field[x:x+kx, y:y+ky, z:z+kz] += kernel * image_t[x,y,z]
+    
+    #remove buffer from image
+    image = wide_field[kx//2:-kx//2, ky//2:-ky//2, kz//2:-kz//2]
+    return image   
+
+
+def calculate_distance(coord1, coord2):
+    """Calculates the distance between two coordinates in 3D space"""
+    return math.sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2 + (coord1[2]-coord2[2])**2)
+
+
+
+
+def filter_peaks(coords, min_distance):
+    """Filters a list of coordinates to merge points that are too close to one another"""
+    filtered_coords = [coords[0]]
+    for i in range(1, len(coords)):
+        prev_coord = filtered_coords[-1]
+        curr_coord = coords[i]
+        dist = calculate_distance(prev_coord, curr_coord)
+        if dist < min_distance:
+            # Calculate midpoint between the two points
+            midpoint = ((prev_coord[0] + curr_coord[0]) / 2, (prev_coord[1] + curr_coord[1]) / 2, (prev_coord[2] + curr_coord[2]) / 2)
+            # Replace previous coordinate with midpoint
+            filtered_coords[-1] = np.round(midpoint).astype(int)
+        else:
+            # Add current coordinate to the list
+            filtered_coords.append(curr_coord)
+    return filtered_coords
+
 
 
 def get_synapses(data, params):
-    
-    #extract location of synapses as blobs in 3D
-    def map_to_im(data, og_dimensions, new_dimensions):
-        
-        data_t = data.copy()
-        data_t = data_t/og_dimensions*new_dimensions
-        image = np.zeros(new_dimensions)
-        
-        #get the pixel location of the data
-        point_coord = np.round(data_t).astype(int)
-        for x, y, z in point_coord:
-            image[x, y, z-1] += 1
-    
-        return image
-    
-    def get_gaussiankde(image, kernel_size, sigma):
-        
-        image_t = image.copy() 
-        kx, ky, kz = kernel_size[0], kernel_size[1], kernel_size[2]
-        
-        #initialise background with a buffer
-        image_buf = np.pad(image_t, ((kx//2,),(ky//2,), (kz//2,)))
-    
-        #initialise the gaussian distribution with size being the size of the kernel and sigma defining the standard deviation of the point spread function
-        kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kx-1)/2)**2+(y-(ky-1)/2)**2+(z-(ky-1)/2)**2)/(2*sigma**2))), kernel_size)
-        kernel = kernel / np.max(kernel)
-    
-        #add gaussian point spread function at each point location
-        wide_field = np.zeros(image_buf.shape) 
-        for x in range(0, image_t.shape[0]):
-            for y in range(0, image_t.shape[1]):
-                for z in range(0, image_t.shape[2]):
-                    if image_t[x,y,z] > 0:
-                        wide_field[x:x+kx, y:y+ky, z:z+kz] += kernel * image_t[x,y,z]
-        
-        #remove buffer from image
-        image = wide_field[kx//2:-kx//2, ky//2:-ky//2, kz//2:-kz//2]
-        return image
 
-    def calculate_distance(coord1, coord2):
-        """Calculates the distance between two coordinates in 3D space"""
-        return math.sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2 + (coord1[2]-coord2[2])**2)
-    
-    def filter_peaks(coords, min_distance):
-        """Filters a list of coordinates to merge points that are too close to one another"""
-        filtered_coords = [coords[0]]
-        for i in range(1, len(coords)):
-            prev_coord = filtered_coords[-1]
-            curr_coord = coords[i]
-            dist = calculate_distance(prev_coord, curr_coord)
-            if dist < min_distance:
-                # Calculate midpoint between the two points
-                midpoint = ((prev_coord[0] + curr_coord[0]) / 2, (prev_coord[1] + curr_coord[1]) / 2, (prev_coord[2] + curr_coord[2]) / 2)
-                # Replace previous coordinate with midpoint
-                filtered_coords[-1] = np.round(midpoint).astype(int)
-            else:
-                # Add current coordinate to the list
-                filtered_coords.append(curr_coord)
-        return filtered_coords
-    
     def filter_clusters(img, min_area, max_area):
         """Filters clusters in 3D image based on their area"""
         regions = measure.regionprops(img)
@@ -224,6 +229,7 @@ def get_synapses(data, params):
             if region.area >= min_area and region.area<=max_area:
                 for coord in region.coords:
                     filtered_img[coord[0], coord[1], coord[2]] = region.label
+
         return filtered_img
     
 
@@ -261,10 +267,9 @@ def get_synapses(data, params):
 
     #apply watershed to seperate clusters, based on the previously computed mask and the local peaks
     synapse_clusters = watershed(-wide_field_vesicles, markers = markers, mask=mask_vesicles, watershed_line=True)
-
+        
     #filtered_clusters
-    filtered_clusters = area_opening(synapse_clusters, area_threshold = min_cluster_area, connectivity=1)
-    filtered_clusters = area_closing(filtered_clusters, area_threshold = max_cluster_area, connectivity=1)
+    filtered_clusters = filter_clusters(synapse_clusters, min_cluster_area, max_cluster_area)
     
     return filtered_clusters
 
@@ -314,132 +319,9 @@ def get_points(data, filtered_clusters, params):
     return vesicle_clusters_loc
 
 
-    def map_to_im(data, og_dimensions, new_dimensions):
-        
-        data_t = data.copy()
-        data_t = data_t/og_dimensions*new_dimensions
-        image = np.zeros(new_dimensions)
-        
-        #get the pixel location of the data
-        point_coord = np.round(data_t).astype(int)
-        for x, y, z in point_coord:
-            image[x, y, z-1] += 1
-    
-        return image
-    
-    def get_gaussiankde(image, kernel_size, sigma):
-        
-        image_t = image.copy() 
-        kx, ky, kz = kernel_size[0], kernel_size[1], kernel_size[2]
-        
-        #initialise background with a buffer
-        image_buf = np.pad(image_t, ((kx//2,),(ky//2,), (kz//2,)))
-    
-        #initialise the gaussian distribution with size being the size of the kernel and sigma defining the standard deviation of the point spread function
-        kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kx-1)/2)**2+(y-(ky-1)/2)**2+(z-(ky-1)/2)**2)/(2*sigma**2))), kernel_size)
-        kernel = kernel / np.max(kernel)
-    
-        #add gaussian point spread function at each point location
-        wide_field = np.zeros(image_buf.shape) 
-        for x in range(0, image_t.shape[0]):
-            for y in range(0, image_t.shape[1]):
-                for z in range(0, image_t.shape[2]):
-                    if image_t[x,y,z] > 0:
-                        wide_field[x:x+kx, y:y+ky, z:z+kz] += kernel * image_t[x,y,z]
-        
-        #remove buffer from image
-        image = wide_field[kx//2:-kx//2, ky//2:-ky//2, kz//2:-kz//2]
-        return image
-
-    def calculate_distance(coord1, coord2):
-        """Calculates the distance between two coordinates in 3D space"""
-        return math.sqrt((coord1[0]-coord2[0])**2 + (coord1[1]-coord2[1])**2 + (coord1[2]-coord2[2])**2)
-    
-    def filter_coords(coords, min_distance):
-        """Filters a list of coordinates to merge points that are too close to one another"""
-        filtered_coords = [coords[0]]
-        for i in range(1, len(coords)):
-            prev_coord = filtered_coords[-1]
-            curr_coord = coords[i]
-            dist = calculate_distance(prev_coord, curr_coord)
-            if dist < min_distance:
-                # Calculate midpoint between the two points
-                midpoint = ((prev_coord[0] + curr_coord[0]) / 2, (prev_coord[1] + curr_coord[1]) / 2, (prev_coord[2] + curr_coord[2]) / 2)
-                # Replace previous coordinate with midpoint
-                filtered_coords[-1] = np.round(midpoint).astype(int)
-            else:
-                # Add current coordinate to the list
-                filtered_coords.append(curr_coord)
-        return filtered_coords
-    
-    def filter_clusters(img, min_area, max_area):
-        """Filters clusters in 3D image based on their area"""
-        regions = measure.regionprops(img)
-        filtered_img = np.zeros_like(img)
-        for region in regions:
-            if region.area >= min_area and region.area<=max_area:
-                for coord in region.coords:
-                    filtered_img[coord[0], coord[1], coord[2]] = region.label
-        return filtered_img
-    
-
-    true_roi_size = params['true_roi_size'] 
-    sf = params['sf']
-    kernel_size = params['kernel_size']
-    sigma = params['sigma']
-    max_threshold_ves = params['max_threshold_ves']
-    min_peak_dist = params['min_peak_dist'] 
-    min_cluster_area = params['min_cluster_area']
-    max_cluster_area = params['max_cluster_area']
-    
-    image_size = (true_roi_size[0]//sf[0], true_roi_size[1]//sf[1], true_roi_size[2]//sf[2])
-    
-    #plot the locations of the vesicles using the same image size as above to a single pixel size and using a large point spread function
-    image_vesicles = map_to_im(data, true_roi_size, image_size)
-    wide_field_vesicles = get_gaussiankde(image_vesicles, kernel_size, sigma)
-
-    #calculate the intensity threshold for the large PSF images, depending on an arbitrary intensity threshold, dependent on the mean and std of each image.
-    ves_thresh = wide_field_vesicles.mean() + wide_field_vesicles.std() * max_threshold_ves
-
-    #create a mask of the large PSF images where for the pixels above the threshold
-    mask_vesicles = (wide_field_vesicles > ves_thresh) * 1
-
-    #get the local peaks, defining the central coordinate of synapses
-    peak_coords = peak_local_max(wide_field_vesicles,labels = mask_vesicles)
-    #filter the peak distances to exclude peaks which are too close to one another and replace them by the halfway point
-    peak_coords = np.array(filter_coords(peak_coords, min_peak_dist))
-
-    #create labels for each peak
-    mask = np.zeros(image_vesicles.shape, dtype=bool)
-    mask[tuple(peak_coords.T)] = True
-    markers, _ = ndi.label(mask)
-
-    #apply watershed to seperate clusters, based on the previously computed mask and the local peaks
-    synapse_clusters = watershed(-wide_field_vesicles, markers = markers, mask=mask_vesicles)
-    #filter clusters to exclude clusters which are too small
-    filtered_clusters = filter_clusters(synapse_clusters, min_cluster_area, max_cluster_area)
-
-    #extract point locations within selected clusters
-    vesicle_clusters_loc = {}
-    for location in data:
-
-        x,y,z = location
-        i,j,k = int(round(x/sf[0])), int(round(y/sf[1])), int(round(z/sf[2])-1)
-        if filtered_clusters[i,j,k]>0:
-            index = filtered_clusters[i,j,k]
-            if index in vesicle_clusters_loc:
-                vesicle_clusters_loc[index] = np.append(vesicle_clusters_loc[index], [location], axis=0)
-            else:
-                vesicle_clusters_loc[index] = np.array([location])      
-        
-        if 0 in list(vesicle_clusters_loc.keys()):
-            vesicle_clusters_loc.pop(0)     
-
-    return peak_coords, filtered_clusters, vesicle_clusters_loc
-
 # Define a function to calculate the volume and sphericity of an ROI
 def calculate_volume_sphericity(roi, params):
-    pixel_size = params['sf'][0]*params['sf'][1]*arams['sf'][2]
+    pixel_size = params['sf'][0]*params['sf'][1]*params['sf'][2]
     region = measure.regionprops(roi)[0]
 
     # Loop through each region and extract the size and sphericity
@@ -465,45 +347,6 @@ def create_histogram(list_of_thresholds, ves_min_dists, saveas = "", save=False)
     plt.show()
 
 
-
-def analysis(list_of_files_for_analysis):
-    min_dist_dict = {}
-    for file_name in list_of_files_for_analysis:
-        
-        vesicles = pd.read_csv(file_name[0])[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
-        synapse_marker = pd.read_csv(file_name[1])[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
-
-        distances = calc_distance_squared_two(vesicles, synapse_marker)
-
-        new_file_name = f"{(file_name[0]).split('/')[4]}_{(file_name[0]).split('/')[5]}"
-
-        min_dist_dict[new_file_name] = distances
-
-    
-    print("Done!")
-    return min_dist_dict
-
-
-def save_csv_files(target_path, list_of_files):
-
-    for i in range(list_of_files.shape[0]):
-
-        new_file_name_w1 = f"{(list_of_files[i,0]).split('/')[4]}_{(list_of_files[i,0]).split('/')[5]}_w1"
-        new_file_name_w2 = f"{(list_of_files[i,1]).split('/')[4]}_{(list_of_files[i,0]).split('/')[5]}_w2"
-
-        new_folder = str(i)
-        new_path = os.path.join(target_path, new_folder)
-        print(new_path)
-        os.mkdir(new_path)
-
-        new_path_w1 = new_path+'/'+(list_of_files[i,0]).split('/')[-1]
-        new_path_w2 = new_path+'/'+(list_of_files[i,1]).split('/')[-1]
-
-        shutil.copyfile(list_of_files[i,0], new_path_w1)
-        shutil.copyfile(list_of_files[i,1], new_path_w2)
-
-        os.rename(new_path_w1, new_path+'/'+new_file_name_w1)
-        os.rename(new_path_w2, new_path+'/'+new_file_name_w2)
 
 
 @njit(fastmath=True,parallel=True)

@@ -10,7 +10,8 @@ import pandas as pd
 from glob import glob
 from src import functions as fcts
 from scipy.spatial import KDTree
-
+from src import multivariateripleyk as rk
+import ripleyk
 
 #initialise paramaters for the detection/selection of synapses
 
@@ -21,14 +22,15 @@ params['kernel_size'] = (50,50,2)
 params['sigma'] = 10
 params['max_threshold_ves'] = 6
 params['min_peak_dist'] = 20
-params['min_cluster_area'] = 10 
+params['min_cluster_area'] = 10
 params['max_cluster_area'] = 50000
 
 
 target_marker = 'PSD'
 access = 'computer'
 target_directory_comp = '/users/isabellegarnreiter/documents/vesicleSTORM/data/STORM_csv_files/'
-target_directory_drive = '/Volumes/STORM_Nathalie/STORM DeMixing/'
+target_directory_drive = '/users/isabellegarnreiter/desktop/'
+target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/psd_storm_data.pkl'
 
 
 # Import all files (cell zones) under one experiment type, but for both dep and spon vesicle targets
@@ -63,8 +65,8 @@ for i in range(0, len(list_of_files)):
     elif access == 'computer':
         new_file_name = f"{(list_of_files[i][0]).split('/')[-1][0:-3]}"
 
-    if files_infos[new_file_name][0] == 1 or new_file_name not in list(files_infos.keys()):
-        vesicles = pd.read_csv(list_of_files[i][files_infos[new_file_name][1]])[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
+    if new_file_name not in list(files_infos.keys()) or files_infos[new_file_name][0] == 1:
+        vesicles = pd.read_csv(list_of_files[i][1])[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
         vesicles[:,2] +=550
 
         PSD = pd.read_csv(list_of_files[i][0])[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
@@ -82,7 +84,7 @@ vesicle_clusters = {}
 synapses = {}
 synapses_unseperated = {}
 
-for key in list(vesicles_data.keys())[:10]:
+for key in list(vesicles_data.keys()):
     print(key)
     filtered_clusters = fcts.get_synapses(vesicles_data[key], params)
     vesicle_clusters_loc = fcts.get_points(vesicles_data[key], filtered_clusters, params)
@@ -91,18 +93,34 @@ for key in list(vesicles_data.keys())[:10]:
     vesicle_clusters[key] = vesicle_clusters_loc
     synapses[key] = seperated_clusters
     synapses_unseperated[key] = filtered_clusters
-
+    
+print('done')
 
 #initiate the csv file to store the information
 
-markers = ['SPON647', 'DEP647', 'PSD680', 'Basson680', 'VAMP680', 'VGLUT647']
+markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP680', 'VGLUT647']
 DIVs = ['8DIV', '10DIV']
 cz = np.linspace(0,12,13).astype(int)
        
-storm_data = pd.DataFrame(columns = ['FileName', 'Date', '647nm', '680nm', 'DIV', 'cellzone', 'ROI label', 'ROI', 'points', 'nearest_neighbor_680', 'nearest_neighbors_647' ])
+storm_data = pd.DataFrame(columns = ['FileName', 
+                                     'Date', 
+                                     '647nm', 
+                                     '680nm', 
+                                     'DIV', 
+                                     'cellzone', 
+                                     'ROI label', 
+                                     'ROI', 
+                                     'points', 
+                                     'nearest_neighbor_680', 
+                                     'nearest_neighbors_647' , 
+                                     'volume', 
+                                     'spherecity', 
+                                     'univariate_ripleyk', 
+                                     'multivariate_ripleyk'])
 
 i = 0
 for k1 in vesicle_clusters.keys():
+    print(k1)
     for k2 in vesicle_clusters[k1].keys():
         i=i+1
         Filename=k1
@@ -120,26 +138,54 @@ for k1 in vesicle_clusters.keys():
         self_dist = KDTree(points)        
         nearest_dist_ves, nearest_ind_ves = PSD_dist.query(points, k=10) 
         
+        volume, sphericity = fcts.calculate_volume_sphericity(ROI, params)
         
-        storm_data.loc[i] = [Filename, Date, marker[0], marker[1], DIV, cellzone, ROI_label, ROI, points, nearest_dist_psd, nearest_dist_ves]
+        x = vesicle_clusters[k1][k2][:,0]*1e-3
+        y = vesicle_clusters[k1][k2][:,1]*1e-3
+        z = vesicle_clusters[k1][k2][:,2]*1e-3
+        
+        
+        f = syn_marker_data[k1][:,0]*1e-3
+        j = syn_marker_data[k1][:,1]*1e-3
+        k = syn_marker_data[k1][:,2]*1e-3
+        
+        radii = list(np.linspace(0,1.5,21))
+        image_vol = params['true_roi_size'][0]*params['true_roi_size'][1]*params['true_roi_size'][2]*1e-9
+        
+        uni_ripleyk = ripleyk.calculate_ripley(radii, volume, d1=x, d2=y, d3=z, CSR_Normalise=True)
+        multi_ripleyk = rk.calculate_ripley(radii, image_vol, d1=f, d2=j, d3=k, s1=x, s2=y, s3=z, CSR_Normalise=True)
+        
 
+        storm_data.loc[i] = [Filename, 
+                             Date, 
+                             marker[0], 
+                             marker[1], 
+                             DIV, 
+                             cellzone, 
+                             ROI_label, 
+                             ROI, 
+                             points, 
+                             nearest_dist_psd, 
+                             nearest_dist_ves, 
+                             volume, 
+                             sphericity, 
+                             uni_ripleyk, 
+                             multi_ripleyk]
+
+print('done')
 
 # Add  new columns to the DataFrame
-storm_data['volume'] = np.nan
-storm_data['sphericity'] = np.nan
+
 storm_data['mean_coloc'] = np.nan
 storm_data['stderror_coloc'] = np.nan
 storm_data['point_count'] = np.nan
 
 #add the values to the DataFrame
 for i, row in storm_data.iterrows():
-    roi = row['ROI']
-    volume, sphericity = fcts.calculate_volume_sphericity(roi, params)
-    storm_data.loc[i, 'volume'] = volume
-    storm_data.loc[i, 'sphericity'] = sphericity
     storm_data.loc[i, 'mean_coloc'] = row['nearest_neighbor_680'].mean()
     storm_data.loc[i, 'stderror_coloc'] = row['nearest_neighbor_680'].std()
     storm_data.loc[i, 'point_count'] = storm_data.loc[i,'points'].shape[0]
     
 
-storm_data.to_pickle('/users/isabellegarnreiter/documents/vesicleSTORM/data/storm_data.pkl')  
+
+storm_data.to_pickle(target_file_path)  
