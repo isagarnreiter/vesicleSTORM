@@ -18,19 +18,19 @@ import ripleyk
 params = {}
 params['true_roi_size'] = (49660,49660,1100)
 params['sf']  = (68, 68, 180)
-params['kernel_size'] = (50,50,2)
-params['sigma'] = 10
-params['max_threshold_ves'] = 6
-params['min_peak_dist'] = 20
-params['min_cluster_area'] = 10
-params['max_cluster_area'] = 50000
+params['kernel_size'] = (40,40,2)
+params['sigma'] = 8
+params['max_threshold_ves'] = 4
+params['min_peak_dist'] = 16
+params['min_cluster_area'] = 32
+params['max_cluster_area'] = 32000
 
 
-target_marker = 'VAMP2680'
-access = 'drive'
+target_marker = 'PSD680'
+access = 'computer'
 target_directory_comp = '/users/isabellegarnreiter/documents/vesicleSTORM/data/STORM_csv_files/'
 target_directory_drive = '/users/isabellegarnreiter/desktop/'
-target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/vamp2_storm_data.pkl'
+target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/psd_storm_data_ripleyk.pkl'
 
 markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647']
 DIVs = ['8DIV', '10DIV']
@@ -114,8 +114,10 @@ storm_data = pd.DataFrame(columns = ['FileName',
                                      'ROI label', 
                                      'ROI', 
                                      'points', 
+                                     'centroid',
                                      'nearest_neighbor_680', 
-                                     'nearest_neighbors_647' , 
+                                     'nearest_neighbors_647',
+                                     'centroid_dist_680',
                                      'volume', 
                                      'spherecity', 
                                      'univariate_ripleyk', 
@@ -138,6 +140,9 @@ for k1 in vesicle_clusters.keys():
         PSD_dist = KDTree(syn_marker_data[k1])
         nearest_dist_psd, nearest_ind_psd = PSD_dist.query(points, k=1) 
         
+        centroid = np.mean(points, axis=0)
+        centroid_dist_psd, centroid_ind_psd = PSD_dist.query(centroid, k=1) 
+        
         self_dist = KDTree(points)        
         nearest_dist_ves, nearest_ind_ves = PSD_dist.query(points, k=10) 
         
@@ -155,7 +160,7 @@ for k1 in vesicle_clusters.keys():
         radii = list(np.linspace(0,1.5,21))
         image_vol = params['true_roi_size'][0]*params['true_roi_size'][1]*params['true_roi_size'][2]*1e-9
         
-        uni_ripleyk = ripleyk.calculate_ripley(radii, volume, d1=x, d2=y, d3=z, CSR_Normalise=True)
+        uni_ripleyk = ripleyk.calculate_ripley(radii, volume, d1=x, d2=y, d3=z, CSR_Normalise=False)
         multi_ripleyk = rk.calculate_ripley(radii, image_vol, d1=f, d2=j, d3=k, s1=x, s2=y, s3=z, CSR_Normalise=True)
         
 
@@ -168,8 +173,10 @@ for k1 in vesicle_clusters.keys():
                              ROI_label, 
                              ROI, 
                              points, 
+                             centroid,
                              nearest_dist_psd, 
-                             nearest_dist_ves, 
+                             nearest_dist_ves,
+                             centroid_dist_psd,
                              volume, 
                              sphericity, 
                              uni_ripleyk, 
@@ -179,15 +186,18 @@ print('done')
 
 # Add  new columns to the DataFrame
 
+storm_data['point count'] = storm_data['points'].apply(lambda arr:arr.shape[0])
+storm_data['mean_coloc'] = storm_data['nearest_neighbor_680'].apply(lambda arr:arr.mean())
+storm_data['stderror_coloc'] = storm_data['nearest_neighbor_680'].apply(lambda arr:arr.std())
+
+
 storm_data['mean_coloc'] = np.nan
 storm_data['stderror_coloc'] = np.nan
-storm_data['point_count'] = np.nan
 
 #add the values to the DataFrame
 for i, row in storm_data.iterrows():
     storm_data.loc[i, 'mean_coloc'] = row['nearest_neighbor_680'].mean()
     storm_data.loc[i, 'stderror_coloc'] = row['nearest_neighbor_680'].std()
-    storm_data.loc[i, 'point_count'] = storm_data.loc[i,'points'].shape[0]
     
 
 

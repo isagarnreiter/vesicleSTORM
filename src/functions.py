@@ -153,7 +153,7 @@ def get_gaussiankde(image, kernel_size, sigma):
     image_buf = np.pad(image_t, ((kx//2,),(ky//2,), (kz//2,)))
 
     #initialise the gaussian distribution
-    kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-(kx-1)/2)**2+(y-(ky-1)/2)**2+(z-(ky-1)/2)**2)/(2*sigma**2))), kernel_size)
+    kernel = np.fromfunction(lambda x, y, z : (1/(2*np.pi*sigma**2)) * np.exp((-1*((x-kx/2)**2+(y-ky/2)**2+(z-kz/2)**2)/(2*sigma**2))), kernel_size)
     kernel = kernel / np.max(kernel)
 
     #add gaussian point spread function at each point location
@@ -224,6 +224,9 @@ def get_synapses(data, params):
     
     #plot the locations of the vesicles using the same image size as above to a single pixel size and using a large point spread function
     image = map_to_im(data, true_roi_size, image_size)
+    unwanted_pixels = np.where(image>100)
+    image[unwanted_pixels] = 0
+    
     gaussian_fit_image = get_gaussiankde(image, kernel_size, sigma)
 
     #calculate the intensity threshold for the large PSF images, depending on an arbitrary intensity threshold, dependent on the mean and std of each image.
