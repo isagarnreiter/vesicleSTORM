@@ -10,27 +10,25 @@ import pandas as pd
 from glob import glob
 from src import functions as fcts
 from scipy.spatial import KDTree
-from src import multivariateripleyk as rk
-import ripleyk
 
 #initialise paramaters for the detection/selection of synapses
 
 params = {}
-params['true_roi_size'] = (49660,49660,1100)
-params['sf']  = (68, 68, 180)
-params['kernel_size'] = (40,40,2)
-params['sigma'] = 8
-params['max_threshold_ves'] = 4
-params['min_peak_dist'] = 16
-params['min_cluster_area'] = 32
-params['max_cluster_area'] = 32000
+params['true_roi_size'] = (49660,49660,1100) #size of the 3d Tiff in microns
+params['sf']  = (68, 68, 180) #defines the level of downsampling to create the filtered image
+params['kernel_size'] = (40,40,2) #kernel size of the gaussian filter
+params['sigma'] = 8 #intensity of the gaussian filter
+params['max_threshold_ves'] = 4 #threshold for the extraction of intensity blobs in the image
+params['min_peak_dist'] = 16 #min distance between 2 peaks (in pixels) - if distance is smaller, the 2 peaks are merged
+params['min_cluster_area'] = 32 #min area of a cluster (in pixels)
+params['max_cluster_area'] = 32000 #max area of a cluster (in pixels)
 
 
 target_marker = 'PSD680'
 access = 'computer'
 target_directory_comp = '/users/isabellegarnreiter/documents/vesicleSTORM/data/STORM_csv_files/'
 target_directory_drive = '/users/isabellegarnreiter/desktop/'
-target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/psd_storm_data_ripleyk.pkl'
+target_file_path = '/users/isabellegarnreiter/documents/vesicleSTORM/data/psd_storm_data.pkl'
 
 markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647']
 DIVs = ['8DIV', '10DIV']
@@ -115,13 +113,11 @@ storm_data = pd.DataFrame(columns = ['FileName',
                                      'ROI', 
                                      'points', 
                                      'centroid',
-                                     'nearest_neighbor_680', 
-                                     'nearest_neighbors_647',
-                                     'centroid_dist_680',
+                                     'NN_647_to_680', 
+                                     'NN_647_to_647',
+                                     'centroid_dist_647_to_680',
                                      'volume', 
-                                     'spherecity', 
-                                     'univariate_ripleyk', 
-                                     'multivariate_ripleyk'])
+                                     'spherecity'])
 
 i = 0
 for k1 in vesicle_clusters.keys():
@@ -160,8 +156,8 @@ for k1 in vesicle_clusters.keys():
         radii = list(np.linspace(0,1.5,21))
         image_vol = params['true_roi_size'][0]*params['true_roi_size'][1]*params['true_roi_size'][2]*1e-9
         
-        uni_ripleyk = ripleyk.calculate_ripley(radii, volume, d1=x, d2=y, d3=z, CSR_Normalise=False)
-        multi_ripleyk = rk.calculate_ripley(radii, image_vol, d1=f, d2=j, d3=k, s1=x, s2=y, s3=z, CSR_Normalise=True)
+        # uni_ripleyk = ripleyk.calculate_ripley(radii, volume, d1=x, d2=y, d3=z, CSR_Normalise=False)
+        # multi_ripleyk = rk.calculate_ripley(radii, image_vol, d1=f, d2=j, d3=k, s1=x, s2=y, s3=z, CSR_Normalise=True)
         
 
         storm_data.loc[i] = [Filename, 
@@ -178,17 +174,15 @@ for k1 in vesicle_clusters.keys():
                              nearest_dist_ves,
                              centroid_dist_psd,
                              volume, 
-                             sphericity, 
-                             uni_ripleyk, 
-                             multi_ripleyk]
+                             sphericity]
 
 print('done')
 
 # Add  new columns to the DataFrame
 
 storm_data['point count'] = storm_data['points'].apply(lambda arr:arr.shape[0])
-storm_data['mean_coloc'] = storm_data['nearest_neighbor_680'].apply(lambda arr:arr.mean())
-storm_data['stderror_coloc'] = storm_data['nearest_neighbor_680'].apply(lambda arr:arr.std())
+storm_data['mean_coloc'] = storm_data['NN_647_to_680'].apply(lambda arr:arr.mean())
+storm_data['stderror_coloc'] = storm_data['NN_647_to_680'].apply(lambda arr:arr.std())
 
 
 storm_data['mean_coloc'] = np.nan
@@ -196,8 +190,8 @@ storm_data['stderror_coloc'] = np.nan
 
 #add the values to the DataFrame
 for i, row in storm_data.iterrows():
-    storm_data.loc[i, 'mean_coloc'] = row['nearest_neighbor_680'].mean()
-    storm_data.loc[i, 'stderror_coloc'] = row['nearest_neighbor_680'].std()
+    storm_data.loc[i, 'mean_coloc'] = row['NN_647_to_680'].mean()
+    storm_data.loc[i, 'stderror_coloc'] = row['NN_647_to_680'].std()
     
 
 
