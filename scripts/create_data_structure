@@ -1,0 +1,129 @@
+import numpy as np
+import pandas as pd
+from glob import glob
+import functions as fcts
+from scipy.spatial import KDTree
+import os
+import re
+
+#initialise paramaters for the detection/selection of synapses
+
+params = {}
+params['true_roi_size'] = (49660,49660,1100) #size of the 3d Tiff in microns
+params['sf']  = (68, 68, 180) #defines the level of downsampling to create the filtered image
+params['kernel_size'] = (40,40,2) #kernel size of the gaussian filter
+params['sigma'] = 8 #intensity of the gaussian filter
+params['max_threshold_ves'] = 4 #threshold for the extraction of intensity blobs in the image
+params['min_peak_dist'] = 16 #min distance between 2 peaks (in pixels) - if distance is smaller, the 2 peaks are merged
+params['min_cluster_area'] = 32 #min area of a cluster (in pixels)
+params['max_cluster_area'] = 32000 #max area of a cluster (in pixels)
+
+
+#target_dir =  filedialog.askdirectory()
+target_dir = '/Users/isabellegarnreiter/Desktop/storm'
+filename = 'storm_data'
+
+
+#what to match the files by to create the dataframe. If want to use all the files in the directory, leave as an empty string.
+match = ''
+
+markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647', 'rimbp680', 'Basson647']
+DIVs = ['6DIV', '8DIV', '10DIV', '13DIV']
+
+
+cz = np.linspace(0,12,13).astype(int)
+
+storm_data = pd.DataFrame(columns = ['FileName', 
+                                     'Date', 
+                                     '647nm', 
+                                     '680nm', 
+                                     'DIV', 
+                                     'Acquisition', 
+                                     'ROI label', 
+                                     'ROI', 
+                                     'points', 
+                                     'centroid',
+                                     'NN_647_to_680', 
+                                     'NN_647_to_647',
+                                     'centroid_dist_647_to_680',
+                                     'volume', 
+                                     'spherecity'])
+
+
+target_dir = '/Users/isabellegarnreiter/Desktop/storm'
+widefield_image = ''
+    
+# usable_exp = pd.read_csv('/users/isabellegarnreiter/documents/vesicleSTORM/data/STORM_binary_list.csv',encoding='latin', sep=',').to_numpy()
+# filename  = usable_exp[:,0]+'_'+usable_exp[:,1]
+# files_infos = dict(zip(filename, usable_exp[:,2:]))
+
+date_pattern = re.compile(r'^\d')
+        
+i = 0
+for folder in os.listdir(target_dir):
+    folder_path = os.path.join(target_dir, folder)
+    # Check if folder is a directory and if the name starts with a date
+    if os.path.isdir(folder_path) and re.compile(r'^\d').match(folder) and match in folder:
+        print(folder)
+
+        Demix_folders = glob(folder_path + '*/CellZone*/*emix')
+        for demix in Demix_folders:
+            if os.path.isdir(demix):
+                channel2 = glob(demix + '*/*w2*.csv')[0]
+                data_in_680 = pd.read_csv(channel2)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
+                data_in_680[:,2] +=550
+
+            points_647_file = os.path.join(demix, 'data/', 'points_647.npy')
+            clusters_647_file = os.path.join(demix, 'data/', 'clusters_647.npy')
+            points_647 = np.load(points_647_file, allow_pickle=True)[()]
+            clusters_647 = np.load(clusters_647_file, allow_pickle=True)[()]
+
+            Date = folder[:6]
+            marker = [x for x in markers if x in folder]
+            marker647 = [x for x in marker if '647' in x][0]
+            marker680 = [x for x in marker if '680' in x][0]
+            DIV = [x for x in DIVs if x in folder][0]
+            acquisition = demix.split('/')[-2]
+
+            for nb in points_647.keys():
+                i=i+1
+                ROI_label = int(nb)
+                cluster_647 = clusters_647[nb]
+                point_647 = points_647[nb]
+
+                data_680_dist = KDTree(data_in_680)
+                nn_647_680, nearest_ind_680 = data_680_dist.query(point_647, k=1) 
+                
+                centroid = np.mean(point_647, axis=0)
+                nn_centroid647_680, nni_centroid647_680 = data_680_dist.query(centroid, k=1) 
+                
+                self_dist = KDTree(point_647)        
+                nn_647_647, nearest_ind_647 = self_dist.query(point_647, k=2) 
+                
+                volume, sphericity = fcts.calculate_volume_sphericity(cluster_647, params)
+                
+                storm_data.loc[i] = [folder, 
+                        Date, 
+                        marker647, 
+                        marker680, 
+                        DIV, 
+                        acquisition, 
+                        ROI_label, 
+                        cluster_647, 
+                        point_647, 
+                        centroid,
+                        nn_647_680, 
+                        nn_647_647,
+                        nn_centroid647_680,
+                        volume, 
+                        sphericity]
+
+
+storm_data['point count'] = storm_data['points'].apply(lambda arr:arr.shape[0])
+storm_data['mean_coloc_680'] = storm_data['NN_647_to_680'].apply(lambda arr:arr.mean())
+storm_data['stderror_coloc_680'] = storm_data['NN_647_to_680'].apply(lambda arr:arr.std())
+storm_data['mean_coloc_647'] = storm_data['NN_647_to_647'].apply(lambda arr:arr.mean())
+storm_data['stderror_coloc_647'] = storm_data['NN_647_to_647'].apply(lambda arr:arr.std())
+
+
+storm_data.to_pickle(os.path.join(target_dir, f'{filename}.csv'))  

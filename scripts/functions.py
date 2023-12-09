@@ -137,7 +137,7 @@ def map_to_im(data, og_dimensions, new_dimensions):
     return image
 
 
-def get_gaussiankde(image, kernel_size, sigma):
+def get_gaussiankde(data, params):
     """
     This function takes an image of dots and fits a gaussian function to each dot to create an intensity profile of the image
     
@@ -145,7 +145,20 @@ def get_gaussiankde(image, kernel_size, sigma):
     kernel_size: 3-dimensional size of the gaussian peak
     sigma: standard deviation of the gaussian function
     """
+
+    og_dimensions = params['true_roi_size'] 
+    sf = params['sf']
+    kernel_size = params['kernel_size']
+    sigma = params['sigma']
+    new_dimensions = (og_dimensions[0]//sf[0], og_dimensions[1]//sf[1], og_dimensions[2]//sf[2])
+
+    image = map_to_im(data, og_dimensions, new_dimensions)
     
+    #normally, the processing steps after STORM romove noisy non-blinking data. If these are not removed, they increase the intensity variance of the generated gaussian approximation.
+    #This next steps minimizes this effect by finding pixel-indices with an unreasonnable amount of points are removing them. 
+    unwanted_pixels = np.where(image>100)
+    image[unwanted_pixels] = 0
+
     image_t = image.copy() 
     kx, ky, kz = kernel_size[0], kernel_size[1], kernel_size[2]
     
@@ -191,7 +204,7 @@ def filter_peaks(coords, min_distance):
     return filtered_coords
 
 
-def get_synapses(data, params):
+def get_clusters(widefield_image, params):
 
     """
     This function takes a list of points defined in x,y,z coordinates and outputs an 3D image of blobs 
@@ -210,48 +223,34 @@ def get_synapses(data, params):
 
         return filtered_img
     
-
-    true_roi_size = params['true_roi_size'] 
-    sf = params['sf']
-    kernel_size = params['kernel_size']
-    sigma = params['sigma']
     max_threshold_ves = params['max_threshold_ves']
     min_peak_dist = params['min_peak_dist'] 
     min_cluster_area = params['min_cluster_area']
     max_cluster_area = params['max_cluster_area']
-    
-    image_size = (true_roi_size[0]//sf[0], true_roi_size[1]//sf[1], true_roi_size[2]//sf[2])
-    
-    #plot the locations of the vesicles using the same image size as above to a single pixel size and using a large point spread function
-    image = map_to_im(data, true_roi_size, image_size)
-    unwanted_pixels = np.where(image>100)
-    image[unwanted_pixels] = 0
-    
-    gaussian_fit_image = get_gaussiankde(image, kernel_size, sigma)
 
     #calculate the intensity threshold for the large PSF images, depending on an arbitrary intensity threshold, dependent on the mean and std of each image.
-    threshold = gaussian_fit_image.mean() + gaussian_fit_image.std() * max_threshold_ves
+    threshold = widefield_image.mean() + widefield_image.std() * max_threshold_ves
 
     #create a mask of the large PSF images where for the pixels above the threshold
-    mask = (gaussian_fit_image > threshold) * 1
+    mask = (widefield_image > threshold) * 1
 
     #get the local peaks, defining the central coordinate of synapses
-    peak_coords = peak_local_max(gaussian_fit_image,labels = mask)
+    peak_coords = peak_local_max(widefield_image,labels = mask)
     
     #filter the peak distances to exclude peaks which are too close to one another and replace them by the  midway point
     peak_coords = np.array(filter_peaks(peak_coords, min_peak_dist))
 
     #create labels for each peak
-    shell = np.zeros(image.shape, dtype=bool)
+    shell = np.zeros(widefield_image.shape, dtype=bool)
     shell[tuple(peak_coords.T)] = True
     markers, _ = ndi.label(shell)
 
     #apply watershed to seperate clusters, based on the previously computed mask and the local peaks
-    synapse_clusters = watershed(-gaussian_fit_image, markers = markers, mask=mask, watershed_line=True)
-        
+    synapse_clusters = watershed(-widefield_image, markers = markers, mask=mask, watershed_line=True)
+
     #filtered_clusters
     filtered_clusters = filter_clusters(synapse_clusters, min_cluster_area, max_cluster_area)
-    
+
     return filtered_clusters
 
 

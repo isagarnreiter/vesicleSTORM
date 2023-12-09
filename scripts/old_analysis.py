@@ -8,7 +8,7 @@ Created on Wed May 17 12:02:29 2023
 import numpy as np
 import pandas as pd
 from glob import glob
-from src import functions as fcts
+import functions as fcts
 from scipy.spatial import KDTree
 
 #initialise paramaters for the detection/selection of synapses
@@ -110,7 +110,7 @@ storm_data = pd.DataFrame(columns = ['FileName',
                                      'DIV', 
                                      'cellzone', 
                                      'ROI label', 
-                                     'ROI', 
+                                     'ROI mask', 
                                      'points', 
                                      'centroid',
                                      'NN_647_to_680', 
