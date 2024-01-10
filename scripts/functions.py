@@ -6,10 +6,6 @@ Created on Fri Mar  3 17:02:41 2023
 @author: isabellegarnreiter
 """
 import numpy as np
-from numba import njit, prange
-import pandas as pd
-import matplotlib.pyplot as plt
-import scipy.ndimage as ndimage
 from skimage.feature import peak_local_max
 from scipy import ndimage as ndi
 from skimage.segmentation import watershed
@@ -18,102 +14,25 @@ from skimage import measure
 
 
 
-def simulation_batch(batch_nb, dim, size):
-    '''
-    
-    Function to generate simulations of SMLM data for labelled synaptic proteins.
-    
-    Input:
-    batch_nb = number of simulations to produce
-    dim = resolution of the images - in the case of the nikon STORM microscope - 17x17x50
-    size = size of the field of view
-    
-    The simulation initialises a random density of background noise (between 1e-10 and 1e-9) for the given field of view.
-    Clusters vary in number (1 to 8), size, number of points contained (50 to 200) and location.
-    
-    Output:
-    batch = dictionary containing arrays of point locations (x,y,z) for all the simulations generated.
-    
-    '''
-    
-    
-    # Function to generate random points around a given center
-    def generate_points_within_range(center, num_points, ranges):
-        x = np.random.uniform(center[0]-ranges[0]/2, center[0]+ranges[0]/2, num_points)
-        y = np.random.uniform(center[1]-ranges[1]/2, center[1]+ranges[1]/2, num_points)
-        z = np.random.uniform(center[2]-ranges[2]/2, center[2]+ranges[2]/2, num_points)
-        return np.column_stack((x, y, z))
-    
-    
-    dxyz = np.array(dim)*np.array(size)
-    
-    batch = {}
+def get_default_params():
+    params = {}
+    #gaussian filtering parameters
+    params['true_roi_size'] = (49660,49660,1100) #size of the 3d Tiff in microns
+    params['sf']  = (68, 68, 180) #scaling factor: defines the size of a pixel in microns in the downsampled image.
+    params['kernel_size'] = (40,40,2) #kernel size of the gaussian filter
+    params['sigma'] = 8 #intensity of the gaussian filter
+    params['max_threshold_ves'] = 4 #threshold for the extraction of intensity blobs in the image
 
-    sim_params = {}
-    sim_params['background point density'] = []
-    sim_params['number of clusters'] = []
-    sim_params['cluster ranges'] = []
-    sim_params['points per cluster'] = []
-    sim_params['cluster locations'] = []
-    
-    for n in range(0,batch_nb):
-        
-        # Define the total number of data points
-        bckgrd_density = np.random.uniform(1e-10, 1e-9)
-        bckgrd = int(bckgrd_density*dxyz[1]*dxyz[1]*dxyz[2])
+    #fine tuning parameters
+    params['min_peak_dist'] = 16 #min distance between 2 peaks (in pixels) - if distance is smaller, the 2 peaks are merged
+    params['min_cluster_area'] = 32 #min area of a cluster (in pixels)
+    params['max_cluster_area'] = 32000 #max area of a cluster (in pixels)
+    params['647_channel'] = 'channel1' #either channel1 or channel2
+    params['filter_680'] = True #
+    params['use_wf_680'] = False #if true: if there is a widefield image, use the widefield image or use the gaussian simulation from the 647 channel (to use eg if using presynaptic markers)
 
-        # Generate a random number of clusters between 5 and 15
-        num_clusters = np.random.randint(1, 8)
+    return params
 
-        # Generate random cluster centers
-        x = np.random.randint(0, dxyz[0], size=(num_clusters))
-        y = np.random.randint(0, dxyz[1], size=(num_clusters))
-        z = np.random.randint(0, dxyz[2], size=(num_clusters))
-
-        centers = np.array([x,y,z]).T
-
-        # Generate random background noise
-        xb = np.random.randint(0, dxyz[0], size=(bckgrd))
-        yb = np.random.randint(0, dxyz[1], size=(bckgrd))
-        zb = np.random.randint(0, dxyz[2], size=(bckgrd))
-
-        bckgrd_points = np.array([xb,yb,zb]).T
-
-        # Generate range for the clusters
-        xr = np.random.uniform(dim[0]*30, dim[0]*150, size=num_clusters)
-        yr = np.random.uniform(dim[1]*30, dim[1]*100, size=num_clusters)
-        zr = np.random.uniform(dim[2]*1, dim[2]*5, size=num_clusters)
-
-        ranges = np.array([xr,yr,zr]).T
-
-        # Generate data points for each cluster
-        number_points = []
-        data_points = []
-        for i in range(num_clusters):
-            num_points = np.random.randint(50, 200)
-            cluster_points = generate_points_within_range(centers[i], num_points, ranges[i])
-            number_points.append(num_points)
-            data_points.append(cluster_points)
-
-        # Combine all the data points into a single array
-        data_points = np.vstack(data_points)
-
-        # Add background noise
-        data_points_with_noise = np.vstack((data_points, bckgrd_points))
-        
-        
-        sim_params
-        batch[n] = data_points_with_noise
-        
-        sim_params['background point density'].append(bckgrd_density)
-        sim_params['number of clusters'].append(num_clusters)
-        sim_params['cluster ranges'].append(ranges)
-        sim_params['points per cluster'].append(number_points)
-        sim_params['cluster locations'].append(centers)
-        
-        
-    return batch, sim_params
- 
 
 def map_to_im(data, og_dimensions, new_dimensions):
     """
@@ -207,7 +126,7 @@ def filter_peaks(coords, min_distance):
 def get_clusters(widefield_image, params):
 
     """
-    This function takes a list of points defined in x,y,z coordinates and outputs an 3D image of blobs 
+    This function takes a list of points defined in x,y,z coordinates and outputs a 3D image of blobs 
     in which the points are most densely packed.  
     """
     
@@ -329,6 +248,7 @@ def calculate_volume_sphericity(roi, params):
     This function calculates the volume (in µms) and spherecity of an ROI
     If the area is too small to calculate its spherecity (1 pixel) the function wil result in a spherecity of 1
     instead of resulting in an error.
+    The spherecity isn't a perfect measure considering the scaling factor is quite large.
     """
     
     pixel_size = params['sf'][0]*params['sf'][1]*params['sf'][2]
@@ -347,3 +267,99 @@ def calculate_volume_sphericity(roi, params):
 
 
 
+def simulation_batch(batch_nb, dim, size):
+    '''
+    NOT UPDATED
+    
+    Function to generate simulations of SMLM data for labelled synaptic proteins.
+    
+    Input:
+    batch_nb = number of simulations to produce
+    dim = resolution of the images - in the case of the nikon STORM microscope - 17x17x50
+    size = size of the field of view
+    
+    The simulation initialises a random density of background noise (between 1e-10 and 1e-9) for the given field of view.
+    Clusters vary in number (1 to 8), size, number of points contained (50 to 200) and location.
+    
+    Output:
+    batch = dictionary containing arrays of point locations (x,y,z) for all the simulations generated.
+    
+    '''
+    
+    
+    # Function to generate random points around a given center
+    def generate_points_within_range(center, num_points, ranges):
+        x = np.random.uniform(center[0]-ranges[0]/2, center[0]+ranges[0]/2, num_points)
+        y = np.random.uniform(center[1]-ranges[1]/2, center[1]+ranges[1]/2, num_points)
+        z = np.random.uniform(center[2]-ranges[2]/2, center[2]+ranges[2]/2, num_points)
+        return np.column_stack((x, y, z))
+    
+    
+    dxyz = np.array(dim)*np.array(size)
+    
+    batch = {}
+
+    sim_params = {}
+    sim_params['background point density'] = []
+    sim_params['number of clusters'] = []
+    sim_params['cluster ranges'] = []
+    sim_params['points per cluster'] = []
+    sim_params['cluster locations'] = []
+    
+    for n in range(0,batch_nb):
+        
+        # Define the total number of data points
+        bckgrd_density = np.random.uniform(1e-10, 1e-9)
+        bckgrd = int(bckgrd_density*dxyz[1]*dxyz[1]*dxyz[2])
+
+        # Generate a random number of clusters between 5 and 15
+        num_clusters = np.random.randint(1, 8)
+
+        # Generate random cluster centers
+        x = np.random.randint(0, dxyz[0], size=(num_clusters))
+        y = np.random.randint(0, dxyz[1], size=(num_clusters))
+        z = np.random.randint(0, dxyz[2], size=(num_clusters))
+
+        centers = np.array([x,y,z]).T
+
+        # Generate random background noise
+        xb = np.random.randint(0, dxyz[0], size=(bckgrd))
+        yb = np.random.randint(0, dxyz[1], size=(bckgrd))
+        zb = np.random.randint(0, dxyz[2], size=(bckgrd))
+
+        bckgrd_points = np.array([xb,yb,zb]).T
+
+        # Generate range for the clusters
+        xr = np.random.uniform(dim[0]*30, dim[0]*150, size=num_clusters)
+        yr = np.random.uniform(dim[1]*30, dim[1]*100, size=num_clusters)
+        zr = np.random.uniform(dim[2]*1, dim[2]*5, size=num_clusters)
+
+        ranges = np.array([xr,yr,zr]).T
+
+        # Generate data points for each cluster
+        number_points = []
+        data_points = []
+        for i in range(num_clusters):
+            num_points = np.random.randint(50, 200)
+            cluster_points = generate_points_within_range(centers[i], num_points, ranges[i])
+            number_points.append(num_points)
+            data_points.append(cluster_points)
+
+        # Combine all the data points into a single array
+        data_points = np.vstack(data_points)
+
+        # Add background noise
+        data_points_with_noise = np.vstack((data_points, bckgrd_points))
+        
+        
+        sim_params
+        batch[n] = data_points_with_noise
+        
+        sim_params['background point density'].append(bckgrd_density)
+        sim_params['number of clusters'].append(num_clusters)
+        sim_params['cluster ranges'].append(ranges)
+        sim_params['points per cluster'].append(number_points)
+        sim_params['cluster locations'].append(centers)
+        
+        
+    return batch, sim_params

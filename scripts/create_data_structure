@@ -1,3 +1,31 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@author: isabellegarnreiter
+
+This code uses the output from filter_STORMdata.py and creates a dataframe, where each row corresponds to data from one cluster, identified in the 647nm channel. 
+
+Current rows:
+'FileName': filename of the acquisition
+'Date': date at which the acquisitopn was made
+'647nm': Marker in the 647nm channel
+'680nm': marker in the 680nm channel
+'DIV': number of days in vitro
+'Acquisition': acqusition number 
+'ROI label': Roi number 
+'ROI': bounding box of 3D ROI mask
+'points': list of points in the cluster
+'centroid': centroid coordinates of the point cloud
+'NN_647_to_680': list of nearest neighbour distances for each point in the 647nm channel to points in the 680nmchannel
+'NN_647_to_680_ind': indexes of selected points in the 680nm channels from the original input list
+'NN_647_to_647': list of nearest neighbour distances between points in the 647nm channel
+'centroid_dist_647_to_680': nearest neighbour distance from the centroid to the 680nm channel
+'volume': volume of the cluster - calculated from the mask
+'spherecity': spherecity of the cluster - calculated from the mask
+
+"""
+
+
 import numpy as np
 import pandas as pd
 from glob import glob
@@ -6,32 +34,26 @@ from scipy.spatial import KDTree
 import os
 import re
 
-#initialise paramaters for the detection/selection of synapses
-
-params = {}
-params['true_roi_size'] = (49660,49660,1100) #size of the 3d Tiff in microns
-params['sf']  = (68, 68, 180) #defines the level of downsampling to create the filtered image
-params['kernel_size'] = (40,40,2) #kernel size of the gaussian filter
-params['sigma'] = 8 #intensity of the gaussian filter
-params['max_threshold_ves'] = 4 #threshold for the extraction of intensity blobs in the image
-params['min_peak_dist'] = 16 #min distance between 2 peaks (in pixels) - if distance is smaller, the 2 peaks are merged
-params['min_cluster_area'] = 32 #min area of a cluster (in pixels)
-params['max_cluster_area'] = 32000 #max area of a cluster (in pixels)
-
 
 #target_dir =  filedialog.askdirectory()
 target_dir = '/Users/isabellegarnreiter/Desktop/storm'
-filename = 'storm_data'
+filename = 'storm_data' 
 
+#name of the widefield image in each folder. 
+widefield_image = ''
 
-#what to match the files by to create the dataframe. If want to use all the files in the directory, leave as an empty string.
+#folder path in which to find the demixed storm files.
+glob_folder_pattern = '*/CellZone*/*emix'
+
+#what to match the files by to create the dataframe. If you want to use all the files in the directory, leave as an empty string.
 match = ''
 
-markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647', 'rimbp680', 'Basson647']
+#update lists for markers and DIVs
+markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647', 'rimbp680', 'Basson647', 'SPON680', 'DEP680']
 DIVs = ['6DIV', '8DIV', '10DIV', '13DIV']
 
 
-cz = np.linspace(0,12,13).astype(int)
+params = fcts.get_default_params()
 
 storm_data = pd.DataFrame(columns = ['FileName', 
                                      'Date', 
@@ -44,18 +66,18 @@ storm_data = pd.DataFrame(columns = ['FileName',
                                      'points', 
                                      'centroid',
                                      'NN_647_to_680', 
+                                     'NN_647_to_680_ind',
                                      'NN_647_to_647',
                                      'centroid_dist_647_to_680',
                                      'volume', 
                                      'spherecity'])
 
 
-target_dir = '/Users/isabellegarnreiter/Desktop/storm'
-widefield_image = ''
-    
+
 # usable_exp = pd.read_csv('/users/isabellegarnreiter/documents/vesicleSTORM/data/STORM_binary_list.csv',encoding='latin', sep=',').to_numpy()
 # filename  = usable_exp[:,0]+'_'+usable_exp[:,1]
 # files_infos = dict(zip(filename, usable_exp[:,2:]))
+
 
 date_pattern = re.compile(r'^\d')
         
@@ -66,11 +88,12 @@ for folder in os.listdir(target_dir):
     if os.path.isdir(folder_path) and re.compile(r'^\d').match(folder) and match in folder:
         print(folder)
 
-        Demix_folders = glob(folder_path + '*/CellZone*/*emix')
+        Demix_folders = glob(folder_path + glob_folder_pattern)
         for demix in Demix_folders:
             if os.path.isdir(demix):
-                channel2 = glob(demix + '*/*w2*.csv')[0]
-                data_in_680 = pd.read_csv(channel2)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
+                #MAKE SURE YOU HAVE THE RIGHT CHANNEL HERE AS WELL.
+                channel1 = glob(demix + '*/*w1*.csv')[0]
+                data_in_680 = pd.read_csv(channel1)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
                 data_in_680[:,2] +=550
 
             points_647_file = os.path.join(demix, 'data/', 'points_647.npy')
@@ -113,6 +136,7 @@ for folder in os.listdir(target_dir):
                         point_647, 
                         centroid,
                         nn_647_680, 
+                        nearest_ind_680, 
                         nn_647_647,
                         nn_centroid647_680,
                         volume, 
@@ -126,4 +150,4 @@ storm_data['mean_coloc_647'] = storm_data['NN_647_to_647'].apply(lambda arr:arr.
 storm_data['stderror_coloc_647'] = storm_data['NN_647_to_647'].apply(lambda arr:arr.std())
 
 
-storm_data.to_pickle(os.path.join(target_dir, f'{filename}.csv'))  
+storm_data.to_pickle(os.path.join(target_dir, f'{filename}.pkl'))  
