@@ -36,8 +36,8 @@ import re
 
 
 #target_dir =  filedialog.askdirectory()
-target_dir = '/Users/isabellegarnreiter/Desktop/storm'
-filename = 'storm_data' 
+target_dir = '/Users/isabellegarnreiter/Desktop/PSD'
+filename = 'PSDstorm_data' 
 
 #name of the widefield image in each folder. 
 widefield_image = ''
@@ -54,6 +54,7 @@ DIVs = ['6DIV', '8DIV', '10DIV', '13DIV']
 
 
 params = fcts.get_default_params()
+params['647_channel'] = 'channel2'
 
 storm_data = pd.DataFrame(columns = ['FileName', 
                                      'Date', 
@@ -64,6 +65,7 @@ storm_data = pd.DataFrame(columns = ['FileName',
                                      'ROI label', 
                                      'ROI', 
                                      'points', 
+                                     'points_680'
                                      'centroid',
                                      'NN_647_to_680', 
                                      'NN_647_to_680_ind',
@@ -91,10 +93,15 @@ for folder in os.listdir(target_dir):
         Demix_folders = glob(folder_path + glob_folder_pattern)
         for demix in Demix_folders:
             if os.path.isdir(demix):
-                #MAKE SURE YOU HAVE THE RIGHT CHANNEL HERE AS WELL.
-                channel1 = glob(demix + '*/*w1*.csv')[0]
-                data_in_680 = pd.read_csv(channel1)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
-                data_in_680[:,2] +=550
+                #MAKE SURE YOU HAVE THE RIGHT CHANNEL HERE.
+                if params['647_channel'] == 'channel1':
+                    channel680 = glob(demix + '*/*w2*.csv')[0]
+
+                elif params['647_channel'] == 'channel2':
+                    channel680 = glob(demix + '*/*w1*.csv')[0]
+
+            data_in_680 = pd.read_csv(channel680)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
+            data_in_680[:,2] +=550
 
             points_647_file = os.path.join(demix, 'data/', 'points_647.npy')
             clusters_647_file = os.path.join(demix, 'data/', 'clusters_647.npy')
@@ -121,7 +128,7 @@ for folder in os.listdir(target_dir):
                 nn_centroid647_680, nni_centroid647_680 = data_680_dist.query(centroid, k=1) 
                 
                 self_dist = KDTree(point_647)        
-                nn_647_647, nearest_ind_647 = self_dist.query(point_647, k=2) 
+                nn_647_647, nearest_ind_647 = self_dist.query(point_647, k=15) 
                 
                 volume, sphericity = fcts.calculate_volume_sphericity(cluster_647, params)
                 
@@ -133,7 +140,8 @@ for folder in os.listdir(target_dir):
                         acquisition, 
                         ROI_label, 
                         cluster_647, 
-                        point_647, 
+                        point_647,
+                        point_647 
                         centroid,
                         nn_647_680, 
                         nearest_ind_680, 

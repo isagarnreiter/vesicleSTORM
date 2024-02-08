@@ -11,7 +11,7 @@ from scipy import ndimage as ndi
 from skimage.segmentation import watershed
 import math
 from skimage import measure
-
+import matplotlib.pyplot as plt
 
 
 def get_default_params():
@@ -20,7 +20,7 @@ def get_default_params():
     params['true_roi_size'] = (49660,49660,1100) #size of the 3d Tiff in microns
     params['sf']  = (68, 68, 180) #scaling factor: defines the size of a pixel in microns in the downsampled image.
     params['kernel_size'] = (40,40,2) #kernel size of the gaussian filter
-    params['sigma'] = 8 #intensity of the gaussian filter
+    params['sigma'] = 10 #intensity of the gaussian filter
     params['max_threshold_ves'] = 4 #threshold for the extraction of intensity blobs in the image
 
     #fine tuning parameters
@@ -28,8 +28,8 @@ def get_default_params():
     params['min_cluster_area'] = 32 #min area of a cluster (in pixels)
     params['max_cluster_area'] = 32000 #max area of a cluster (in pixels)
     params['647_channel'] = 'channel1' #either channel1 or channel2
-    params['filter_680'] = True #
-    params['use_wf_680'] = False #if true: if there is a widefield image, use the widefield image or use the gaussian simulation from the 647 channel (to use eg if using presynaptic markers)
+    params['filter_680'] = True #if true: will apply same density based clustering algorithm to data in the 680 channel and extract points
+    params['use_wf_680'] = True #if true: if there is a widefield image, use the widefield image or use the gaussian simulation from the 647 channel (to use eg if using presynaptic markers)
 
     return params
 
@@ -72,12 +72,14 @@ def get_gaussiankde(data, params):
     new_dimensions = (og_dimensions[0]//sf[0], og_dimensions[1]//sf[1], og_dimensions[2]//sf[2])
 
     image = map_to_im(data, og_dimensions, new_dimensions)
-    
+
     #normally, the processing steps after STORM romove noisy non-blinking data. If these are not removed, they increase the intensity variance of the generated gaussian approximation.
     #This next steps minimizes this effect by finding pixel-indices with an unreasonnable amount of points are removing them. 
-    unwanted_pixels = np.where(image>100)
-    image[unwanted_pixels] = 0
-
+    # unwanted_pixels = np.where(image>100)
+    # image[unwanted_pixels] = 0
+    
+    indices = np.array(np.where(image>100))
+    image[indices.T] = 0
     image_t = image.copy() 
     kx, ky, kz = kernel_size[0], kernel_size[1], kernel_size[2]
     
@@ -98,7 +100,6 @@ def get_gaussiankde(data, params):
     
     #remove buffer from image
     gaussian_image = gaussian_image[kx//2:-kx//2, ky//2:-ky//2, kz//2:-kz//2]
-    
     return gaussian_image   
 
 
@@ -149,7 +150,6 @@ def get_clusters(widefield_image, params):
 
     #calculate the intensity threshold for the large PSF images, depending on an arbitrary intensity threshold, dependent on the mean and std of each image.
     threshold = widefield_image.mean() + widefield_image.std() * max_threshold_ves
-
     #create a mask of the large PSF images where for the pixels above the threshold
     mask = (widefield_image > threshold) * 1
 
@@ -169,7 +169,6 @@ def get_clusters(widefield_image, params):
 
     #filtered_clusters
     filtered_clusters = filter_clusters(synapse_clusters, min_cluster_area, max_cluster_area)
-
     return filtered_clusters
 
 

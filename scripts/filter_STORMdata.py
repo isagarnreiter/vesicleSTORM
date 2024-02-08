@@ -33,7 +33,7 @@ from tkinter import filedialog
 
 
 #target_dir =  filedialog.askdirectory()
-target_dir = '/Users/isabellegarnreiter/Desktop/storm'
+target_dir = '/Users/isabellegarnreiter/Desktop/PSD'
 widefield_image = '' #input name of widefield images or keep as an empty string if there is none
 
 
@@ -41,6 +41,8 @@ date_pattern = re.compile(r'^\d') #pattern used to match the filter out folderna
 
 #initialise paramaters for the detection/selection of synapses. Go to given function to check default parameters.
 params = fcts.get_default_params()
+params['647_channel'] = 'channel2'
+params['filter_680'] = False
 
 for folder in os.listdir(target_dir):
     folder_path = os.path.join(target_dir, folder)
@@ -51,7 +53,6 @@ for folder in os.listdir(target_dir):
         Demix_folders = glob(folder_path + '*/CellZone*/*emix')
         for demix in Demix_folders:
             if os.path.isdir(demix):
-
                 data_folder = os.path.join(demix, 'data')
                 if not os.path.exists(data_folder):
                     os.makedirs(data_folder)
@@ -65,20 +66,26 @@ for folder in os.listdir(target_dir):
                     channel_647 = glob(demix + '*/*w2*.csv')[0]
                     channel_680 = glob(demix + '*/*w1*.csv')[0]
 
+                data_in_680 = pd.read_csv(channel_680)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
+
                 data_in_647 = pd.read_csv(channel_647)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
+
                 data_in_647[:,2] +=550
+                data_in_680[:,2] +=550
+                wfi_data = np.concatenate((data_in_647, data_in_680), axis=0)
 
                 if glob(folder_path + f'*/Acquisition*/{widefield_image}'):
                     wfi = widefield_image #turn to numpy array
 
                 else: 
                     image_size = (params['true_roi_size'][0]//params['sf'][0], params['true_roi_size'][1]//params['sf'][1], params['true_roi_size'][2]//params['sf'][2])
-                    wfi = fcts.get_gaussiankde(data_in_647, params)
+                    wfi = fcts.get_gaussiankde(wfi_data, params)
                     np.save(os.path.join(data_folder, 'simulated_widefield.npy'), wfi, allow_pickle=True)
 
                 masks_647 = fcts.get_clusters(wfi, params)
-                cluster_points_647 = fcts.get_points(data_in_647, masks_647, params)
+                cluster_points_647 = fcts.get_points(data_in_647, masks_647, params)    
                 seperated_clusters_647 = fcts.seperate_clusters(masks_647)
+
 
                 np.save(os.path.join(data_folder, 'masks_647.npy'), np.array(masks_647), allow_pickle=True)
                 np.save(os.path.join(data_folder, 'clusters_647.npy'), np.array(seperated_clusters_647), allow_pickle=True)
@@ -90,7 +97,7 @@ for folder in os.listdir(target_dir):
 
                     if params['use_wf_680'] == False:
                         wfi_680 = fcts.get_gaussiankde(data_in_680, params)
-                        np.save(os.path.join(data_folder, 'simulated_widefiel_680.npy'), wfi_680, allow_pickle=True)
+                        np.save(os.path.join(data_folder, 'simulated_widefield_680.npy'), wfi_680, allow_pickle=True)
 
                     if params['use_wf_680'] == True:
                         wfi_680 = wfi
@@ -102,8 +109,3 @@ for folder in os.listdir(target_dir):
                     np.save(os.path.join(data_folder, 'masks_680.npy'), np.array(masks_680), allow_pickle=True)
                     np.save(os.path.join(data_folder, 'clusters_680.npy'), np.array(seperated_clusters_680), allow_pickle=True)
                     np.save(os.path.join(data_folder, 'points_680.npy'), np.array(cluster_points_680), allow_pickle=True)
-
-
-
-            
-
