@@ -64,8 +64,8 @@ storm_data = pd.DataFrame(columns = ['FileName',
                                      'Acquisition', 
                                      'ROI label', 
                                      'ROI', 
-                                     'points', 
-                                     'points_680'
+                                     'points_647', 
+                                     'points_680',
                                      'centroid',
                                      'NN_647_to_680', 
                                      'NN_647_to_680_ind',
@@ -100,13 +100,17 @@ for folder in os.listdir(target_dir):
                 elif params['647_channel'] == 'channel2':
                     channel680 = glob(demix + '*/*w1*.csv')[0]
 
+            #load the dataset for the 680-marker, to measure the nearest neighbour to the points in the 647 channel
             data_in_680 = pd.read_csv(channel680)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
             data_in_680[:,2] +=550
 
+            #load the clusters, the points in the 680 channel and the points in the 647 channel
             points_647_file = os.path.join(demix, 'data/', 'points_647.npy')
             clusters_647_file = os.path.join(demix, 'data/', 'clusters_647.npy')
             points_647 = np.load(points_647_file, allow_pickle=True)[()]
             clusters_647 = np.load(clusters_647_file, allow_pickle=True)[()]
+            points_680_file = os.path.join(demix, 'data/', 'points_680.npy')
+            points_680 = np.load(points_680_file, allow_pickle=True)[()]
 
             Date = folder[:6]
             marker = [x for x in markers if x in folder]
@@ -121,14 +125,26 @@ for folder in os.listdir(target_dir):
                 cluster_647 = clusters_647[nb]
                 point_647 = points_647[nb]
 
-                data_680_dist = KDTree(data_in_680)
-                nn_647_680, nearest_ind_680 = data_680_dist.query(point_647, k=1) 
+                if params['filter_680']==True:
+                    point_680 = points_680[nb]
+
+                else:
+                    point_680 = None
+
+                if len(point_647) > 0:
+                    data_680_dist = KDTree(data_in_680)
+                    nn_647_680, nearest_ind_680 = data_680_dist.query(point_647, k=1) 
                 
-                centroid = np.mean(point_647, axis=0)
-                nn_centroid647_680, nni_centroid647_680 = data_680_dist.query(centroid, k=1) 
+                    centroid = np.mean(point_647, axis=0)
+                    nn_centroid647_680, nni_centroid647_680 = data_680_dist.query(centroid, k=1) 
                 
-                self_dist = KDTree(point_647)        
-                nn_647_647, nearest_ind_647 = self_dist.query(point_647, k=15) 
+                    self_dist = KDTree(point_647)        
+                    nn_647_647, nearest_ind_647 = self_dist.query(point_647, k=15) 
+
+                else:
+                    #if there are not points in the 647 channel for a particular cluster, which can happen if the wfi is generated using points in both channels, 
+                    #the cluster is not included in the dataframe.
+                    break
                 
                 volume, sphericity = fcts.calculate_volume_sphericity(cluster_647, params)
                 
@@ -141,7 +157,7 @@ for folder in os.listdir(target_dir):
                         ROI_label, 
                         cluster_647, 
                         point_647,
-                        point_647 
+                        point_680, 
                         centroid,
                         nn_647_680, 
                         nearest_ind_680, 
@@ -151,7 +167,7 @@ for folder in os.listdir(target_dir):
                         sphericity]
 
 
-storm_data['point count'] = storm_data['points'].apply(lambda arr:arr.shape[0])
+storm_data['point count'] = storm_data['points_647'].apply(lambda arr:arr.shape[0])
 storm_data['mean_coloc_680'] = storm_data['NN_647_to_680'].apply(lambda arr:arr.mean())
 storm_data['stderror_coloc_680'] = storm_data['NN_647_to_680'].apply(lambda arr:arr.std())
 storm_data['mean_coloc_647'] = storm_data['NN_647_to_647'].apply(lambda arr:arr.mean())

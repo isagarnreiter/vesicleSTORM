@@ -29,8 +29,7 @@ def get_default_params():
     params['max_cluster_area'] = 32000 #max area of a cluster (in pixels)
     params['647_channel'] = 'channel1' #either channel1 or channel2
     params['filter_680'] = True #if true: will apply same density based clustering algorithm to data in the 680 channel and extract points
-    params['use_wf_680'] = True #if true: if there is a widefield image, use the widefield image or use the gaussian simulation from the 647 channel (to use eg if using presynaptic markers)
-
+    params['data_for_wf'] = "both" #which data to use to create the simulated widefield image. 'Both'takes in all channels, '647' only points in the 647 channel or '680' for points in the 680 channel
     return params
 
 
@@ -201,8 +200,7 @@ def seperate_clusters(img):
         
     return bounding_boxes
 
-
-def get_points(data, filtered_clusters, params):
+def get_points(data, filtered_clusters, seperate_clusters, params):
     """
     This function extracts points located within defined areas and stores them in a new dictionary vesicle_clusters_loc.
     
@@ -220,25 +218,28 @@ def get_points(data, filtered_clusters, params):
         x, y, z = location
         
         # Convert coordinates to indices based on scaling factors
-        i, j, k = int(round(x / sf[0])), int(round(y / sf[1])), int(round(z / sf[2]) - 1)
+        i, j, k = int(round(x / sf[0]))-1, int(round(y / sf[1])-1), int(round(z / sf[2])-1)
         
         # Check if the corresponding filtered cluster value is greater than 0
-        if filtered_clusters[i, j, k] > 0:
-            index = filtered_clusters[i, j, k]
-            
-            # Check if the index already exists in the vesicle_clusters_loc dictionary
-            if index in vesicle_clusters_loc:
-                vesicle_clusters_loc[index] = np.append(vesicle_clusters_loc[index], [location], axis=0)
-            else:
-                vesicle_clusters_loc[index] = np.array([location])
+        
+        index = filtered_clusters[i, j, k]
+        
+        # Check if the index already exists in the vesicle_clusters_loc dictionary
+        if index in vesicle_clusters_loc:
+            vesicle_clusters_loc[index] = np.append(vesicle_clusters_loc[index], [location], axis=0)
+        else:
+            vesicle_clusters_loc[index] = np.array([location])
         
         # Remove the entry with key 0 from vesicle_clusters_loc if it exists
         if 0 in list(vesicle_clusters_loc.keys()):
             vesicle_clusters_loc.pop(0)
+
+    for key in seperate_clusters:
+        if key not in vesicle_clusters_loc:
+            vesicle_clusters_loc[key] = []
     
     # Return the dictionary of vesicle cluster point locations
     return vesicle_clusters_loc
-
 
 
 # Define a function to calculate the volume and sphericity of an ROI

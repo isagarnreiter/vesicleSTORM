@@ -42,7 +42,6 @@ date_pattern = re.compile(r'^\d') #pattern used to match the filter out folderna
 #initialise paramaters for the detection/selection of synapses. Go to given function to check default parameters.
 params = fcts.get_default_params()
 params['647_channel'] = 'channel2'
-params['filter_680'] = False
 
 for folder in os.listdir(target_dir):
     folder_path = os.path.join(target_dir, folder)
@@ -72,7 +71,16 @@ for folder in os.listdir(target_dir):
 
                 data_in_647[:,2] +=550
                 data_in_680[:,2] +=550
-                wfi_data = np.concatenate((data_in_647, data_in_680), axis=0)
+
+                if params["data_for_wf"]=='both':
+                    wfi_data = np.concatenate((data_in_647, data_in_680), axis=0)
+                
+                elif params["data_for_wf"]=='647':
+                    wfi_data = data_in_647
+                
+                elif params["data_for_wf"]=='680':
+                    wfi_data = data_in_680
+                
 
                 if glob(folder_path + f'*/Acquisition*/{widefield_image}'):
                     wfi = widefield_image #turn to numpy array
@@ -83,29 +91,18 @@ for folder in os.listdir(target_dir):
                     np.save(os.path.join(data_folder, 'simulated_widefield.npy'), wfi, allow_pickle=True)
 
                 masks_647 = fcts.get_clusters(wfi, params)
-                cluster_points_647 = fcts.get_points(data_in_647, masks_647, params)    
                 seperated_clusters_647 = fcts.seperate_clusters(masks_647)
-
+                cluster_points_647 = fcts.get_points(data_in_647, masks_647, seperated_clusters_647, params)    
+                
 
                 np.save(os.path.join(data_folder, 'masks_647.npy'), np.array(masks_647), allow_pickle=True)
                 np.save(os.path.join(data_folder, 'clusters_647.npy'), np.array(seperated_clusters_647), allow_pickle=True)
                 np.save(os.path.join(data_folder, 'points_647.npy'), np.array(cluster_points_647), allow_pickle=True)
 
                 if params['filter_680'] == True:
-                    data_in_680 = pd.read_csv(channel_680)[['x [nm]', 'y [nm]', 'z [nm]']].to_numpy(dtype=np.float64)
-                    data_in_680[:,2] +=550
 
-                    if params['use_wf_680'] == False:
-                        wfi_680 = fcts.get_gaussiankde(data_in_680, params)
-                        np.save(os.path.join(data_folder, 'simulated_widefield_680.npy'), wfi_680, allow_pickle=True)
+                    #masks_680 = fcts.get_clusters(wfi, params)
+                    cluster_points_680 = fcts.get_points(data_in_680, masks_647, seperated_clusters_647, params)
+                    seperated_clusters_680 = fcts.seperate_clusters(masks_647)
 
-                    if params['use_wf_680'] == True:
-                        wfi_680 = wfi
-
-                    masks_680 = fcts.get_clusters(wfi_680, params)
-                    cluster_points_680 = fcts.get_points(data_in_680, masks_680, params)
-                    seperated_clusters_680 = fcts.seperate_clusters(masks_680)
-
-                    np.save(os.path.join(data_folder, 'masks_680.npy'), np.array(masks_680), allow_pickle=True)
-                    np.save(os.path.join(data_folder, 'clusters_680.npy'), np.array(seperated_clusters_680), allow_pickle=True)
                     np.save(os.path.join(data_folder, 'points_680.npy'), np.array(cluster_points_680), allow_pickle=True)
