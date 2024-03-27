@@ -33,7 +33,7 @@ from tkinter import filedialog
 
 
 #target_dir =  filedialog.askdirectory()
-target_dir = '/Users/isabellegarnreiter/Desktop/PSD'
+target_dir = '/Volumes/Seagate/Elisa_STORM/HRP/Good'
 widefield_image = '' #input name of widefield images or keep as an empty string if there is none
 
 
@@ -41,7 +41,7 @@ date_pattern = re.compile(r'^\d') #pattern used to match the filter out folderna
 
 #initialise paramaters for the detection/selection of synapses. Go to given function to check default parameters.
 params = fcts.get_default_params()
-params['647_channel'] = 'channel2'
+params['647_channel'] = 'channel1'
 
 for folder in os.listdir(target_dir):
     folder_path = os.path.join(target_dir, folder)
@@ -49,7 +49,7 @@ for folder in os.listdir(target_dir):
     if os.path.isdir(folder_path) and re.compile(r'^\d').match(folder):
         print(folder)
 
-        Demix_folders = glob(folder_path + '*/CellZone*/*emix')
+        Demix_folders = glob(folder_path + '*/Acquisition*/Demix')
         for demix in Demix_folders:
             if os.path.isdir(demix):
                 data_folder = os.path.join(demix, 'data')
@@ -82,13 +82,9 @@ for folder in os.listdir(target_dir):
                     wfi_data = data_in_680
                 
 
-                if glob(folder_path + f'*/Acquisition*/{widefield_image}'):
-                    wfi = widefield_image #turn to numpy array
-
-                else: 
-                    image_size = (params['true_roi_size'][0]//params['sf'][0], params['true_roi_size'][1]//params['sf'][1], params['true_roi_size'][2]//params['sf'][2])
-                    wfi = fcts.get_gaussiankde(wfi_data, params)
-                    np.save(os.path.join(data_folder, 'simulated_widefield.npy'), wfi, allow_pickle=True)
+                image_size = (params['true_roi_size'][0]//params['sf'][0], params['true_roi_size'][1]//params['sf'][1], params['true_roi_size'][2]//params['sf'][2])
+                wfi = fcts.get_gaussiankde(wfi_data, params)
+                np.save(os.path.join(data_folder, 'simulated_widefield.npy'), wfi, allow_pickle=True)
 
                 masks_647 = fcts.get_clusters(wfi, params)
                 seperated_clusters_647 = fcts.seperate_clusters(masks_647)

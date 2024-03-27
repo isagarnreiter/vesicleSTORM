@@ -36,20 +36,20 @@ import re
 
 
 #target_dir =  filedialog.askdirectory()
-target_dir = '/Users/isabellegarnreiter/Desktop/PSD'
-filename = 'PSDstorm_data' 
+target_dir = '/Volumes/Seagate/Elisa_STORM/HRP/Good'
+filename = 'storm_data' 
 
 #name of the widefield image in each folder. 
 widefield_image = ''
 
 #folder path in which to find the demixed storm files.
-glob_folder_pattern = '*/CellZone*/*emix'
+glob_folder_pattern = '*/Acquisition*/Demix'
 
 #what to match the files by to create the dataframe. If you want to use all the files in the directory, leave as an empty string.
 match = ''
 
 #update lists for markers and DIVs
-markers = ['SPON647', 'DEP647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647', 'rimbp680', 'Basson647', 'SPON680', 'DEP680']
+markers = ['spon647', 'dep647', 'PSD680', 'Bassoon680', 'VAMP2680', 'VGLUT647', 'rimbp680', 'Basson647', 'sponhrp680', 'dephrp680']
 DIVs = ['6DIV', '8DIV', '10DIV', '13DIV']
 
 
